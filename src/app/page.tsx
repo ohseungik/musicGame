@@ -3,7 +3,8 @@
 import { useState, useEffect, useRef, useCallback } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Play, Pause, RotateCcw, Music, Gamepad2 } from "lucide-react"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Play, Pause, RotateCcw, Music, Gamepad2, FastForward } from "lucide-react"
 import { toast } from "sonner"
 
 interface Note {
@@ -25,7 +26,7 @@ interface GameStats {
 }
 
 const LANES = 4
-const NOTE_SPEED = 350 // pixels per second
+const BASE_NOTE_SPEED = 350 // pixels per second (기본 속도)
 const JUDGMENT_LINE_Y = 500
 const PERFECT_THRESHOLD = 40
 const GOOD_THRESHOLD = 80
@@ -44,6 +45,7 @@ export default function RhythmGame() {
   })
   const [pressedKeys, setPressedKeys] = useState<Set<number>>(new Set())
   const [judgment, setJudgment] = useState<{ text: string; color: string } | null>(null)
+  const [speedMultiplier, setSpeedMultiplier] = useState<number>(1) // 배속 상태 추가
 
   const gameAreaRef = useRef<HTMLDivElement>(null)
   const animationRef = useRef<number>(0)
@@ -240,7 +242,8 @@ export default function RhythmGame() {
           if (note.hit) return note
 
           const noteTime = elapsed - note.startTime
-          const newY = (noteTime / 1000) * NOTE_SPEED
+          // 배속 적용
+          const newY = (noteTime / 1000) * BASE_NOTE_SPEED * speedMultiplier
 
           return { ...note, currentY: newY }
         })
@@ -308,7 +311,7 @@ export default function RhythmGame() {
         animationRef.current = requestAnimationFrame(gameLoop)
       }
     },
-    [gameState, notes, createNoteElement],
+    [gameState, notes, createNoteElement, speedMultiplier], // speedMultiplier 의존성 추가
   )
 
   // 게임 시작
@@ -335,7 +338,7 @@ export default function RhythmGame() {
     pauseTimeRef.current = 0
     setGameState("playing")
 
-    toast("A, S, D, F 키 또는 화살표 키를 사용하세요");
+    toast(`현재 배속: ${speedMultiplier}x. A, S, D, F 키 또는 화살표 키를 사용하세요`);
   }
 
   // 게임 일시정지/재개
@@ -444,6 +447,34 @@ export default function RhythmGame() {
                   </div>
                 ))}
               </div>
+
+              {/* 배속 선택 UI */}
+              <div className="flex items-center justify-center gap-3 mb-6">
+                <FastForward className="w-5 h-5 text-gray-400" />
+                <span className="text-gray-300">배속:</span>
+                <Select
+                  value={speedMultiplier.toString()}
+                  onValueChange={(value) => setSpeedMultiplier(Number.parseFloat(value))}
+                >
+                  <SelectTrigger className="w-[120px] bg-gray-800 border-gray-600 text-white">
+                    <SelectValue placeholder="1.0x" />
+                  </SelectTrigger>
+                  <SelectContent className="bg-gray-800 border-gray-600 text-white">
+                    <SelectItem value="0.5">0.5x</SelectItem>
+                    <SelectItem value="0.75">0.75x</SelectItem>
+                    <SelectItem value="1">1.0x</SelectItem>
+                    <SelectItem value="1.25">1.25x</SelectItem>
+                    <SelectItem value="1.5">1.5x</SelectItem>
+                    <SelectItem value="1.75">1.75x</SelectItem>
+                    <SelectItem value="2">2.0x</SelectItem>
+                    <SelectItem value="2.5">2.5x</SelectItem>
+                    <SelectItem value="3">3.0x</SelectItem>
+                    <SelectItem value="3.5">3.5x</SelectItem>
+                    <SelectItem value="4">4.0x</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
               <Button onClick={startGame} size="lg" className="bg-purple-600 hover:bg-purple-700 shadow-lg">
                 <Play className="w-5 h-5 mr-2" />
                 게임 시작
@@ -465,6 +496,9 @@ export default function RhythmGame() {
                 </div>
                 <div className="text-white">
                   최대 콤보: <span className="text-blue-400 font-bold text-lg">{stats.maxCombo}</span>
+                </div>
+                <div className="text-white">
+                  배속: <span className="text-purple-400 font-bold text-lg">{speedMultiplier.toFixed(2)}x</span>
                 </div>
               </div>
               <div className="flex gap-3">
