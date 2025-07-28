@@ -4,7 +4,7 @@ import { useState, useEffect, useRef, useCallback } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Play, Pause, RotateCcw, Music, Gamepad2, FastForward, Keyboard } from "lucide-react"
+import { Play, Pause, RotateCcw, Music, Gamepad2, FastForward, Keyboard, Target } from "lucide-react"
 import { toast } from "sonner"
 
 interface Note {
@@ -84,6 +84,31 @@ const KEY_MODES = {
   },
 }
 
+// 난이도별 설정 추가
+const DIFFICULTY_SETTINGS = {
+  easy: {
+    name: "Easy",
+    noteInterval: { min: 800, max: 1200 }, // 노트 간격 (ms)
+    patternComplexity: 0.3, // 복잡한 패턴 확률
+    speedMultiplier: 0.8, // 기본 속도 배수
+    color: "text-green-400",
+  },
+  normal: {
+    name: "Normal",
+    noteInterval: { min: 400, max: 800 },
+    patternComplexity: 0.6,
+    speedMultiplier: 1.0,
+    color: "text-yellow-400",
+  },
+  hard: {
+    name: "Hard",
+    noteInterval: { min: 200, max: 600 },
+    patternComplexity: 1.0,
+    speedMultiplier: 1.2,
+    color: "text-red-400",
+  },
+}
+
 export default function RhythmGame() {
   const [gameState, setGameState] = useState<"menu" | "playing" | "paused" | "ended">("menu")
   const [notes, setNotes] = useState<Note[]>([])
@@ -99,6 +124,8 @@ export default function RhythmGame() {
   const [judgment, setJudgment] = useState<{ text: string; color: string } | null>(null)
   const [speedMultiplier, setSpeedMultiplier] = useState<number>(1)
   const [keyMode, setKeyMode] = useState<4 | 6 | 8>(4) // 키 모드 상태 추가
+  // 상태에 difficulty 추가
+  const [difficulty, setDifficulty] = useState<"easy" | "normal" | "hard">("normal")
 
   const gameAreaRef = useRef<HTMLDivElement>(null)
   const animationRef = useRef<number>(0)
@@ -109,40 +136,50 @@ export default function RhythmGame() {
 
   // 현재 키 모드 설정 가져오기
   const currentKeyConfig = KEY_MODES[keyMode]
+  // 현재 난이도 설정 가져오기
+  const currentDifficultyConfig = DIFFICULTY_SETTINGS[difficulty]
 
-  // 샘플 노트 패턴 생성 (키 모드에 따라 동적으로)
+  // 샘플 노트 패턴 생성 (키 모드와 난이도에 따라 동적으로)
   const generateNotes = useCallback(() => {
     const newNotes: Note[] = []
     const lanes = keyMode
+    const diffConfig = DIFFICULTY_SETTINGS[difficulty]
 
-    // 키 모드에 따른 패턴 생성
+    // 키 모드와 난이도에 따른 패턴 생성
     const generatePatterns = () => {
       const patterns = []
 
-      // 단일 노트
+      // 단일 노트 (모든 난이도)
       for (let i = 0; i < lanes; i++) {
         patterns.push([i])
       }
 
-      // 더블 노트
-      for (let i = 0; i < lanes - 1; i++) {
-        patterns.push([i, i + 1])
-        if (i < lanes - 2) patterns.push([i, i + 2])
+      // 더블 노트 (Normal 이상)
+      if (diffConfig.patternComplexity >= 0.6) {
+        for (let i = 0; i < lanes - 1; i++) {
+          patterns.push([i, i + 1])
+          if (i < lanes - 2) patterns.push([i, i + 2])
+        }
       }
 
-      // 트리플 노트 (6키, 8키에서)
-      if (lanes >= 6) {
+      // 트리플 노트 (Hard + 6키 이상)
+      if (diffConfig.patternComplexity >= 1.0 && lanes >= 6) {
         for (let i = 0; i < lanes - 2; i++) {
           patterns.push([i, i + 1, i + 2])
         }
       }
 
-      // 쿼드 노트 (8키에서)
-      if (lanes >= 8) {
+      // 쿼드 노트 (Hard + 8키)
+      if (diffConfig.patternComplexity >= 1.0 && lanes >= 8) {
         patterns.push([0, 1, 2, 3])
         patterns.push([4, 5, 6, 7])
         patterns.push([0, 2, 4, 6])
         patterns.push([1, 3, 5, 7])
+      }
+
+      // Easy 모드에서는 복잡한 패턴 제한
+      if (difficulty === "easy") {
+        return patterns.filter((pattern) => pattern.length <= 2)
       }
 
       return patterns
@@ -150,10 +187,27 @@ export default function RhythmGame() {
 
     const patterns = generatePatterns()
 
-    for (let time = 3000; time < 90000; time += 400 + Math.random() * 600) {
-      const pattern = patterns[Math.floor(Math.random() * patterns.length)]
+    // 난이도별 노트 간격으로 생성
+    for (
+      let time = 3000;
+      time < 90000;
+      time += diffConfig.noteInterval.min + Math.random() * (diffConfig.noteInterval.max - diffConfig.noteInterval.min)
+    ) {
+      // 난이도에 따른 패턴 선택
+      let selectedPattern
+      if (difficulty === "easy") {
+        // Easy: 단일 노트 위주
+        const singleNotes = patterns.filter((p) => p.length === 1)
+        const doubleNotes = patterns.filter((p) => p.length === 2)
+        selectedPattern =
+          Math.random() < 0.7
+            ? singleNotes[Math.floor(Math.random() * singleNotes.length)]
+            : doubleNotes[Math.floor(Math.random() * doubleNotes.length)] || singleNotes[0]
+      } else {
+        selectedPattern = patterns[Math.floor(Math.random() * patterns.length)]
+      }
 
-      pattern.forEach((lane) => {
+      selectedPattern.forEach((lane) => {
         newNotes.push({
           id: noteIdRef.current++,
           lane,
@@ -165,7 +219,7 @@ export default function RhythmGame() {
     }
 
     return newNotes.sort((a, b) => a.startTime - b.startTime)
-  }, [keyMode])
+  }, [keyMode, difficulty])
 
   // 노트 DOM 요소 생성
   const createNoteElement = useCallback(
@@ -303,7 +357,7 @@ export default function RhythmGame() {
 
           const noteTime = elapsed - note.startTime
           // 배속 적용
-          const newY = (noteTime / 1000) * BASE_NOTE_SPEED * speedMultiplier
+          const newY = (noteTime / 1000) * BASE_NOTE_SPEED * speedMultiplier * currentDifficultyConfig.speedMultiplier
 
           return { ...note, currentY: newY }
         })
@@ -371,7 +425,7 @@ export default function RhythmGame() {
         animationRef.current = requestAnimationFrame(gameLoop)
       }
     },
-    [gameState, notes, createNoteElement, speedMultiplier],
+    [gameState, notes, createNoteElement, speedMultiplier, difficulty],
   )
 
   // 게임 시작
@@ -398,7 +452,7 @@ export default function RhythmGame() {
     pauseTimeRef.current = 0
     setGameState("playing")
 
-    toast(`${keyMode}키 모드, 배속: ${speedMultiplier}x`);
+    toast(`${keyMode}키 ${currentDifficultyConfig.name} 모드, 배속: ${speedMultiplier}x`);
   }
 
   // 게임 일시정지/재개
@@ -511,6 +565,31 @@ export default function RhythmGame() {
                 </Select>
               </div>
 
+              {/* 난이도 선택 UI를 키 모드 선택 아래에 추가 */}
+              <div className="flex items-center justify-center gap-3 mb-4">
+                <Target className="w-5 h-5 text-gray-400" />
+                <span className="text-gray-300">난이도:</span>
+                <Select
+                  value={difficulty}
+                  onValueChange={(value) => setDifficulty(value as "easy" | "normal" | "hard")}
+                >
+                  <SelectTrigger className="w-[120px] bg-gray-800 border-gray-600 text-white">
+                    <SelectValue placeholder="Normal" />
+                  </SelectTrigger>
+                  <SelectContent className="bg-gray-800 border-gray-600 text-white">
+                    <SelectItem value="easy">
+                      <span className="text-green-400">Easy</span>
+                    </SelectItem>
+                    <SelectItem value="normal">
+                      <span className="text-yellow-400">Normal</span>
+                    </SelectItem>
+                    <SelectItem value="hard">
+                      <span className="text-red-400">Hard</span>
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
               {/* 키 레이아웃 표시 */}
               <div
                 className={`grid gap-4 mb-6 ${keyMode === 4 ? "grid-cols-4" : keyMode === 6 ? "grid-cols-6" : "grid-cols-8"}`}
@@ -577,7 +656,9 @@ export default function RhythmGame() {
                   최대 콤보: <span className="text-blue-400 font-bold text-lg">{stats.maxCombo}</span>
                 </div>
                 <div className="text-white">
-                  {keyMode}키 | <span className="text-purple-400 font-bold text-lg">{speedMultiplier.toFixed(2)}x</span>
+                  {keyMode}키 |{" "}
+                  <span className={`font-bold ${currentDifficultyConfig.color}`}>{currentDifficultyConfig.name}</span> |{" "}
+                  <span className="text-purple-400 font-bold text-lg">{speedMultiplier.toFixed(2)}x</span>
                 </div>
               </div>
               <div className="flex gap-3">
@@ -709,6 +790,9 @@ export default function RhythmGame() {
             </CardTitle>
           </CardHeader>
           <CardContent className="text-gray-300 space-y-2">
+            <p>
+              • <strong>난이도</strong>: Easy (느린 속도, 단순 패턴), Normal (보통 속도), Hard (빠른 속도, 복잡한 패턴)
+            </p>
             <p>
               • <strong>키 모드</strong>를 선택하여 4키, 6키, 8키 중 원하는 모드로 플레이하세요
             </p>
