@@ -4,7 +4,7 @@ import { useState, useEffect, useRef, useCallback } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Play, Pause, RotateCcw, Music, Gamepad2, FastForward } from "lucide-react"
+import { Play, Pause, RotateCcw, Music, Gamepad2, FastForward, Keyboard } from "lucide-react"
 import { toast } from "sonner"
 
 interface Note {
@@ -25,12 +25,64 @@ interface GameStats {
   miss: number
 }
 
-const LANES = 4
 const BASE_NOTE_SPEED = 350 // pixels per second (기본 속도)
 const JUDGMENT_LINE_Y = 500
 const PERFECT_THRESHOLD = 40
 const GOOD_THRESHOLD = 80
 const GAME_HEIGHT = 600
+
+// 키 모드별 설정
+const KEY_MODES = {
+  4: {
+    keys: ["A", "S", "D", "F"],
+    keyMap: {
+      KeyA: 0,
+      ArrowLeft: 0,
+      KeyS: 1,
+      ArrowDown: 1,
+      KeyD: 2,
+      ArrowUp: 2,
+      KeyF: 3,
+      ArrowRight: 3,
+    },
+    colors: ["bg-red-500", "bg-blue-500", "bg-green-500", "bg-yellow-500"],
+  },
+  6: {
+    keys: ["A", "S", "D", "J", "K", "L"],
+    keyMap: {
+      KeyA: 0,
+      KeyS: 1,
+      KeyD: 2,
+      KeyJ: 3,
+      KeyK: 4,
+      KeyL: 5,
+    },
+    colors: ["bg-red-500", "bg-blue-500", "bg-green-500", "bg-yellow-500", "bg-purple-500", "bg-pink-500"],
+  },
+  8: {
+    keys: ["A", "S", "D", "F", "J", "K", "L", ";"],
+    keyMap: {
+      KeyA: 0,
+      KeyS: 1,
+      KeyD: 2,
+      KeyF: 3,
+      KeyJ: 4,
+      KeyK: 5,
+      KeyL: 6,
+      Semicolon: 7,
+    },
+    colors: [
+      "bg-red-500",
+      "bg-blue-500",
+      "bg-green-500",
+      "bg-yellow-500",
+      "bg-purple-500",
+      "bg-pink-500",
+      "bg-indigo-500",
+      "bg-orange-500",
+    ],
+  },
+}
 
 export default function RhythmGame() {
   const [gameState, setGameState] = useState<"menu" | "playing" | "paused" | "ended">("menu")
@@ -45,7 +97,8 @@ export default function RhythmGame() {
   })
   const [pressedKeys, setPressedKeys] = useState<Set<number>>(new Set())
   const [judgment, setJudgment] = useState<{ text: string; color: string } | null>(null)
-  const [speedMultiplier, setSpeedMultiplier] = useState<number>(1) // 배속 상태 추가
+  const [speedMultiplier, setSpeedMultiplier] = useState<number>(1)
+  const [keyMode, setKeyMode] = useState<4 | 6 | 8>(4) // 키 모드 상태 추가
 
   const gameAreaRef = useRef<HTMLDivElement>(null)
   const animationRef = useRef<number>(0)
@@ -54,24 +107,48 @@ export default function RhythmGame() {
   const noteIdRef = useRef(0)
   const notesMapRef = useRef<Map<number, HTMLDivElement>>(new Map())
 
-  // 샘플 노트 패턴 생성
+  // 현재 키 모드 설정 가져오기
+  const currentKeyConfig = KEY_MODES[keyMode]
+
+  // 샘플 노트 패턴 생성 (키 모드에 따라 동적으로)
   const generateNotes = useCallback(() => {
     const newNotes: Note[] = []
-    const patterns = [
-      [0],
-      [1],
-      [2],
-      [3], // 단일 노트
-      [0, 2],
-      [1, 3],
-      [0, 3],
-      [1, 2], // 더블 노트
-      [0, 1],
-      [1, 2],
-      [2, 3], // 인접 더블
-      [0, 1, 2],
-      [1, 2, 3], // 트리플 노트
-    ]
+    const lanes = keyMode
+
+    // 키 모드에 따른 패턴 생성
+    const generatePatterns = () => {
+      const patterns = []
+
+      // 단일 노트
+      for (let i = 0; i < lanes; i++) {
+        patterns.push([i])
+      }
+
+      // 더블 노트
+      for (let i = 0; i < lanes - 1; i++) {
+        patterns.push([i, i + 1])
+        if (i < lanes - 2) patterns.push([i, i + 2])
+      }
+
+      // 트리플 노트 (6키, 8키에서)
+      if (lanes >= 6) {
+        for (let i = 0; i < lanes - 2; i++) {
+          patterns.push([i, i + 1, i + 2])
+        }
+      }
+
+      // 쿼드 노트 (8키에서)
+      if (lanes >= 8) {
+        patterns.push([0, 1, 2, 3])
+        patterns.push([4, 5, 6, 7])
+        patterns.push([0, 2, 4, 6])
+        patterns.push([1, 3, 5, 7])
+      }
+
+      return patterns
+    }
+
+    const patterns = generatePatterns()
 
     for (let time = 3000; time < 90000; time += 400 + Math.random() * 600) {
       const pattern = patterns[Math.floor(Math.random() * patterns.length)]
@@ -88,72 +165,55 @@ export default function RhythmGame() {
     }
 
     return newNotes.sort((a, b) => a.startTime - b.startTime)
-  }, [])
+  }, [keyMode])
 
   // 노트 DOM 요소 생성
-  const createNoteElement = useCallback((note: Note) => {
-    const element = document.createElement("div")
-    element.className = `absolute rounded-lg border-2 border-white z-10 shadow-lg`
-    element.style.width = `calc(${100 / LANES}% - 8px)`
-    element.style.height = "36px"
-    element.style.left = `calc(${(note.lane * 100) / LANES}% + 4px)`
-    element.style.transform = "translateY(-100px)"
-    element.style.willChange = "transform"
-    element.style.transition = "opacity 0.2s ease-out"
+  const createNoteElement = useCallback(
+    (note: Note) => {
+      const element = document.createElement("div")
+      element.className = `absolute rounded-lg border-2 border-white z-10 shadow-lg`
+      element.style.width = `calc(${100 / keyMode}% - 8px)`
+      element.style.height = "36px"
+      element.style.left = `calc(${(note.lane * 100) / keyMode}% + 4px)`
+      element.style.transform = "translateY(-100px)"
+      element.style.willChange = "transform"
+      element.style.transition = "opacity 0.2s ease-out"
 
-    // 레인별 색상
-    const colors = ["bg-red-500", "bg-blue-500", "bg-green-500", "bg-yellow-500"]
-    element.classList.add(colors[note.lane])
+      // 레인별 색상
+      element.classList.add(currentKeyConfig.colors[note.lane])
 
-    return element
-  }, [])
+      return element
+    },
+    [keyMode, currentKeyConfig],
+  )
 
   // 키 입력 처리
   const handleKeyDown = useCallback(
     (event: KeyboardEvent) => {
       if (gameState !== "playing") return
 
-      const keyMap: { [key: string]: number } = {
-        KeyA: 0,
-        ArrowLeft: 0,
-        KeyS: 1,
-        ArrowDown: 1,
-        KeyD: 2,
-        ArrowUp: 2,
-        KeyF: 3,
-        ArrowRight: 3,
-      }
-
-      const lane = keyMap[event.code]
+      const lane = currentKeyConfig.keyMap[event.code as keyof typeof currentKeyConfig.keyMap]
       if (lane !== undefined && !pressedKeys.has(lane)) {
         setPressedKeys((prev) => new Set(prev).add(lane))
         checkNoteHit(lane)
       }
     },
-    [gameState, pressedKeys, notes],
+    [gameState, pressedKeys, notes, currentKeyConfig],
   )
 
-  const handleKeyUp = useCallback((event: KeyboardEvent) => {
-    const keyMap: { [key: string]: number } = {
-      KeyA: 0,
-      ArrowLeft: 0,
-      KeyS: 1,
-      ArrowDown: 1,
-      KeyD: 2,
-      ArrowUp: 2,
-      KeyF: 3,
-      ArrowRight: 3,
-    }
-
-    const lane = keyMap[event.code]
-    if (lane !== undefined) {
-      setPressedKeys((prev) => {
-        const newSet = new Set(prev)
-        newSet.delete(lane)
-        return newSet
-      })
-    }
-  }, [])
+  const handleKeyUp = useCallback(
+    (event: KeyboardEvent) => {
+      const lane = currentKeyConfig.keyMap[event.code as keyof typeof currentKeyConfig.keyMap]
+      if (lane !== undefined) {
+        setPressedKeys((prev) => {
+          const newSet = new Set(prev)
+          newSet.delete(lane)
+          return newSet
+        })
+      }
+    },
+    [currentKeyConfig],
+  )
 
   // 노트 히트 체크 (위치 기반)
   const checkNoteHit = useCallback(
@@ -311,7 +371,7 @@ export default function RhythmGame() {
         animationRef.current = requestAnimationFrame(gameLoop)
       }
     },
-    [gameState, notes, createNoteElement, speedMultiplier], // speedMultiplier 의존성 추가
+    [gameState, notes, createNoteElement, speedMultiplier],
   )
 
   // 게임 시작
@@ -338,7 +398,7 @@ export default function RhythmGame() {
     pauseTimeRef.current = 0
     setGameState("playing")
 
-    toast(`현재 배속: ${speedMultiplier}x. A, S, D, F 키 또는 화살표 키를 사용하세요`);
+    toast(`${keyMode}키 모드, 배속: ${speedMultiplier}x`);
   }
 
   // 게임 일시정지/재개
@@ -412,9 +472,6 @@ export default function RhythmGame() {
     }
   }, [])
 
-  const laneColors = ["bg-red-500", "bg-blue-500", "bg-green-500", "bg-yellow-500"]
-  const keyLabels = ["A", "S", "D", "F"]
-
   return (
     <div className="min-h-screen bg-black text-white p-4">
       <div className="max-w-6xl mx-auto space-y-6">
@@ -422,7 +479,7 @@ export default function RhythmGame() {
           <h1 className="text-4xl font-bold bg-gradient-to-r from-purple-400 to-pink-400 bg-clip-text text-transparent">
             리듬 게임
           </h1>
-          <p className="text-lg text-gray-300">A, S, D, F 키 또는 화살표 키를 사용하여 떨어지는 노트를 맞춰보세요!</p>
+          <p className="text-lg text-gray-300">키보드를 사용하여 떨어지는 노트를 맞춰보세요!</p>
         </div>
 
         {gameState === "menu" && (
@@ -434,16 +491,38 @@ export default function RhythmGame() {
               </CardTitle>
               <CardDescription className="text-gray-300">리듬에 맞춰 키를 눌러 높은 점수를 획득하세요!</CardDescription>
             </CardHeader>
-            <CardContent className="text-center space-y-4">
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-                {keyLabels.map((key, index) => (
+            <CardContent className="text-center space-y-6">
+              {/* 키 모드 선택 */}
+              <div className="flex items-center justify-center gap-3 mb-4">
+                <Keyboard className="w-5 h-5 text-gray-400" />
+                <span className="text-gray-300">키 모드:</span>
+                <Select
+                  value={keyMode.toString()}
+                  onValueChange={(value) => setKeyMode(Number.parseInt(value) as 4 | 6 | 8)}
+                >
+                  <SelectTrigger className="w-[120px] bg-gray-800 border-gray-600 text-white">
+                    <SelectValue placeholder="4키" />
+                  </SelectTrigger>
+                  <SelectContent className="bg-gray-800 border-gray-600 text-white">
+                    <SelectItem value="4">4키</SelectItem>
+                    <SelectItem value="6">6키</SelectItem>
+                    <SelectItem value="8">8키</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* 키 레이아웃 표시 */}
+              <div
+                className={`grid gap-4 mb-6 ${keyMode === 4 ? "grid-cols-4" : keyMode === 6 ? "grid-cols-6" : "grid-cols-8"}`}
+              >
+                {currentKeyConfig.keys.map((key, index) => (
                   <div key={index} className="text-center">
                     <div
-                      className={`w-16 h-16 mx-auto rounded-lg ${laneColors[index]} flex items-center justify-center text-2xl font-bold mb-2 shadow-lg`}
+                      className={`w-12 h-12 mx-auto rounded-lg ${currentKeyConfig.colors[index]} flex items-center justify-center text-lg font-bold mb-2 shadow-lg`}
                     >
                       {key}
                     </div>
-                    <p className="text-sm text-gray-400">레인 {index + 1}</p>
+                    <p className="text-xs text-gray-400">레인 {index + 1}</p>
                   </div>
                 ))}
               </div>
@@ -485,7 +564,7 @@ export default function RhythmGame() {
 
         {(gameState === "playing" || gameState === "paused") && (
           <>
-            {/* 게임 UI - 버튼들이 잘 보이도록 수정 */}
+            {/* 게임 UI */}
             <div className="flex justify-between items-center bg-gray-900 p-4 rounded-lg shadow-lg border border-gray-700">
               <div className="flex gap-6 text-sm">
                 <div className="text-white">
@@ -498,7 +577,7 @@ export default function RhythmGame() {
                   최대 콤보: <span className="text-blue-400 font-bold text-lg">{stats.maxCombo}</span>
                 </div>
                 <div className="text-white">
-                  배속: <span className="text-purple-400 font-bold text-lg">{speedMultiplier.toFixed(2)}x</span>
+                  {keyMode}키 | <span className="text-purple-400 font-bold text-lg">{speedMultiplier.toFixed(2)}x</span>
                 </div>
               </div>
               <div className="flex gap-3">
@@ -540,7 +619,7 @@ export default function RhythmGame() {
             >
               {/* 레인 */}
               <div className="absolute inset-0 flex">
-                {Array.from({ length: LANES }).map((_, index) => (
+                {Array.from({ length: keyMode }).map((_, index) => (
                   <div
                     key={index}
                     className={`flex-1 border-r border-gray-600 relative transition-all duration-150 ${
@@ -550,11 +629,11 @@ export default function RhythmGame() {
                     {/* 키 라벨 */}
                     <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 z-30">
                       <div
-                        className={`w-14 h-14 rounded-xl ${laneColors[index]} flex items-center justify-center text-xl font-bold shadow-lg border-2 border-white ${
+                        className={`w-10 h-10 rounded-xl ${currentKeyConfig.colors[index]} flex items-center justify-center text-sm font-bold shadow-lg border-2 border-white ${
                           pressedKeys.has(index) ? "scale-110 shadow-2xl" : ""
                         } transition-all duration-100`}
                       >
-                        {keyLabels[index]}
+                        {currentKeyConfig.keys[index]}
                       </div>
                     </div>
                   </div>
@@ -631,9 +710,18 @@ export default function RhythmGame() {
           </CardHeader>
           <CardContent className="text-gray-300 space-y-2">
             <p>
-              • <strong>A, S, D, F</strong> 키 또는 <strong>화살표 키</strong>를 사용하여 각 레인의 노트를 맞춰보세요
+              • <strong>키 모드</strong>를 선택하여 4키, 6키, 8키 중 원하는 모드로 플레이하세요
             </p>
-            <p>• 노트가 판정선(흰색 선)에 도달할 때 키를 누르면 점수를 획득합니다</p>
+            <p>
+              • <strong>4키</strong>: A, S, D, F 또는 화살표 키
+            </p>
+            <p>
+              • <strong>6키</strong>: A, S, D, J, K, L
+            </p>
+            <p>
+              • <strong>8키</strong>: A, S, D, F, J, K, L, ;
+            </p>
+            <p>• 노트가 판정선(흰색 선)에 도달할 때 해당 키를 누르면 점수를 획득합니다</p>
             <p>
               • <strong>PERFECT</strong>: 정확한 타이밍 (1000점 + 콤보 보너스)
             </p>
